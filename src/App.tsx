@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
-import { Circle, Layer, Stage, Text } from "react-konva";
+import { useEffect, useMemo, useState } from "react";
+import { Circle, Layer, Rect, Stage, Text } from "react-konva";
 
 type Screen = "home" | "materials" | "ohajiki";
+
+type CounterColor = "red" | "blue";
 
 type Counter = {
   id: number;
   x: number;
   y: number;
-  color: string;
+  color: CounterColor;
 };
 
 type Material = {
@@ -18,12 +20,16 @@ type Material = {
   available: boolean;
 };
 
-const initialCounters: Counter[] = Array.from({ length: 10 }, (_, index) => ({
-  id: index + 1,
-  x: 110 + (index % 5) * 110,
-  y: 190 + Math.floor(index / 5) * 120,
-  color: index < 5 ? "#ef4444" : "#3b82f6",
-}));
+type StageSize = {
+  width: number;
+  height: number;
+};
+
+const RED_COLOR = "#ef4444";
+const BLUE_COLOR = "#3b82f6";
+
+const MIN_COUNTERS = 1;
+const MAX_COUNTERS = 30;
 
 const materials: Material[] = [
   {
@@ -83,6 +89,65 @@ const materials: Material[] = [
     available: false,
   },
 ];
+
+function getCounterRadius(width: number): number {
+  if (width < 480) {
+    return 28;
+  }
+
+  if (width < 768) {
+    return 32;
+  }
+
+  return 38;
+}
+
+function getCounterFill(color: CounterColor): string {
+  return color === "red" ? RED_COLOR : BLUE_COLOR;
+}
+
+function getSafeStageWidth(width: number): number {
+  return Math.max(width, 320);
+}
+
+function createInitialCounters(stageWidth = 900): Counter[] {
+  const safeWidth = getSafeStageWidth(stageWidth);
+  const radius = getCounterRadius(safeWidth);
+  const gap = radius * 2 + Math.max(12, radius * 0.45);
+  const availableWidth = Math.max(safeWidth - 40, gap);
+  const columns = Math.max(2, Math.min(5, Math.floor(availableWidth / gap)));
+  const totalLayoutWidth = (columns - 1) * gap;
+  const startX = Math.max(radius + 20, (safeWidth - totalLayoutWidth) / 2);
+
+  return Array.from({ length: 10 }, (_, index) => ({
+    id: index + 1,
+    x: startX + (index % columns) * gap,
+    y: 145 + Math.floor(index / columns) * gap,
+    color: index < 5 ? "red" : "blue",
+  }));
+}
+
+function clampCounterPosition(
+  x: number,
+  y: number,
+  size: StageSize,
+): { x: number; y: number } {
+  const radius = getCounterRadius(size.width);
+  const horizontalMargin = radius + 8;
+  const topMargin = 100 + radius;
+  const bottomMargin = radius + 12;
+
+  return {
+    x: Math.min(
+      Math.max(x, horizontalMargin),
+      Math.max(horizontalMargin, size.width - horizontalMargin),
+    ),
+    y: Math.min(
+      Math.max(y, topMargin),
+      Math.max(topMargin, size.height - bottomMargin),
+    ),
+  };
+}
 
 function App() {
   const [screen, setScreen] = useState<Screen>("home");
@@ -248,18 +313,56 @@ type OhajikiScreenProps = {
 };
 
 function OhajikiScreen({ onBack }: OhajikiScreenProps) {
-  const [counters, setCounters] = useState<Counter[]>(initialCounters);
-  const [size, setSize] = useState({
+  const [counters, setCounters] = useState<Counter[]>(() =>
+    createInitialCounters(),
+  );
+
+  const [size, setSize] = useState<StageSize>({
     width: 0,
     height: 0,
   });
 
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [message, setMessage] = useState(
+    "おはじきを動かして、5と10のまとまりを作ってみよう。",
+  );
+
+  const counterRadius = useMemo(
+    () => getCounterRadius(size.width),
+    [size.width],
+  );
+
+  const redCount = useMemo(
+    () => counters.filter((counter) => counter.color === "red").length,
+    [counters],
+  );
+
+  const blueCount = counters.length - redCount;
+
   useEffect(() => {
     const updateSize = () => {
-      setSize({
+      const nextSize = {
         width: window.innerWidth,
-        height: Math.max(window.innerHeight - 120, 420),
-      });
+        height: Math.max(window.innerHeight - 215, 480),
+      };
+
+      setSize(nextSize);
+
+      setCounters((current) =>
+        current.map((counter) => {
+          const safePosition = clampCounterPosition(
+            counter.x,
+            counter.y,
+            nextSize,
+          );
+
+          return {
+            ...counter,
+            x: safePosition.x,
+            y: safePosition.y,
+          };
+        }),
+      );
     };
 
     updateSize();
@@ -270,55 +373,459 @@ function OhajikiScreen({ onBack }: OhajikiScreenProps) {
     };
   }, []);
 
+  const playSound = (
+    frequency = 520,
+    duration = 0.09,
+    volume = 0.06,
+  ) => {
+    if (!soundEnabled) {
+      return;
+    }
+
+    try {
+      type AudioWindow = Window &
+        typeof globalThis & {
+          webkitAudioContext?: typeof AudioContext;
+        };
+
+      const audioWindow = window as AudioWindow;
+      const AudioContextClass =
+        audioWindow.AudioContext ?? audioWindow.webkitAudioContext;
+
+      if (!AudioContextClass) {
+        return;
+      }
+
+      const audioContext = new AudioContextClass();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(
+        frequency,
+        audioContext.currentTime,
+      );
+
+      gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(
+        0.001,
+        audioContext.currentTime + duration,
+      );
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + duration);
+
+      oscillator.addEventListener("ended", () => {
+        void audioContext.close();
+      });
+    } catch {
+      // 音声機能が利用できない環境では、教材操作を継続する。
+    }
+  };
+
+  const playSuccessSound = () => {
+    playSound(523, 0.1, 0.06);
+
+    window.setTimeout(() => {
+      playSound(659, 0.1, 0.06);
+    }, 100);
+
+    window.setTimeout(() => {
+      playSound(784, 0.14, 0.07);
+    }, 200);
+  };
+
   const resetCounters = () => {
-    setCounters(initialCounters);
+    setCounters(createInitialCounters(size.width || window.innerWidth));
+    setMessage("おはじきを、はじめの場所にもどしました。");
+    playSuccessSound();
+  };
+
+  const arrangeCounters = () => {
+    const width = size.width || window.innerWidth;
+    const radius = getCounterRadius(width);
+    const gap = radius * 2 + Math.max(12, radius * 0.45);
+    const availableWidth = Math.max(width - 40, gap);
+    const columns = Math.max(
+      2,
+      Math.min(5, Math.floor(availableWidth / gap)),
+    );
+
+    const totalLayoutWidth = (columns - 1) * gap;
+    const startX = Math.max(radius + 20, (width - totalLayoutWidth) / 2);
+    const startY = 145;
+
+    setCounters((current) =>
+      current.map((counter, index) => ({
+        ...counter,
+        x: startX + (index % columns) * gap,
+        y: startY + Math.floor(index / columns) * gap,
+      })),
+    );
+
+    setMessage("おはじきを、きれいにせいれつしました。");
+    playSuccessSound();
+  };
+
+  const arrangeFiveGroups = () => {
+  if (counters.length < 5) {
+    setMessage("5のまとまりには、おはじきが5こ以上必要です。");
+    playSound(240, 0.16, 0.05);
+    return;
+  }
+
+  const width = size.width || window.innerWidth;
+  const height = size.height || 520;
+  const radius = getCounterRadius(width);
+
+  const itemsPerGroup = 5;
+
+  // 画面幅に収まるよう、5個分の間隔を計算する
+  const availableWidth = Math.max(width - radius * 2 - 40, 200);
+  const preferredGap = radius * 2 + 14;
+  const maximumGap = availableWidth / (itemsPerGroup - 1);
+  const horizontalGap = Math.min(preferredGap, maximumGap);
+
+  const groupWidth = horizontalGap * (itemsPerGroup - 1);
+  const startX = Math.max(
+    radius + 20,
+    (width - groupWidth) / 2,
+  );
+
+  const verticalGap = radius * 2 + 42;
+  const startY = 150;
+
+  setCounters((current) =>
+    current.map((counter, index) => {
+      const positionInGroup = index % itemsPerGroup;
+      const groupIndex = Math.floor(index / itemsPerGroup);
+
+      const targetX =
+        startX + positionInGroup * horizontalGap;
+
+      const targetY =
+        startY + groupIndex * verticalGap;
+
+      const safePosition = clampCounterPosition(
+  targetX,
+  targetY,
+  {
+    width,
+    height,
+  },
+);
+
+      return {
+        ...counter,
+        x: safePosition.x,
+        y: safePosition.y,
+      };
+    }),
+  );
+
+  const completeGroups = Math.floor(counters.length / 5);
+  const remainder = counters.length % 5;
+
+  if (remainder === 0) {
+    setMessage(
+      `5このまとまりを${completeGroups}つ作りました。`,
+    );
+  } else {
+    setMessage(
+      `5このまとまりを${completeGroups}つ作り、のこりは${remainder}こです。`,
+    );
+  }
+
+  playSuccessSound();
+};
+
+  const arrangeTenGroup = () => {
+    if (counters.length < 10) {
+      setMessage("10のまとまりには、おはじきが10こ以上必要です。");
+      playSound(240, 0.16, 0.05);
+      return;
+    }
+
+    const width = size.width || window.innerWidth;
+    const radius = getCounterRadius(width);
+    const gap = radius * 2 + Math.max(10, radius * 0.3);
+    const maxColumns = width < 720 ? 5 : 10;
+    const columns = Math.min(maxColumns, counters.length);
+    const totalLayoutWidth = (columns - 1) * gap;
+    const startX = Math.max(
+      radius + 16,
+      (width - totalLayoutWidth) / 2,
+    );
+
+    setCounters((current) =>
+      current.map((counter, index) => ({
+        ...counter,
+        x: startX + (index % columns) * gap,
+        y: 155 + Math.floor(index / columns) * (radius * 2 + 30),
+      })),
+    );
+
+    setMessage("10このまとまりを作りました。");
+    playSuccessSound();
+  };
+
+  const addCounter = (color: CounterColor) => {
+    if (counters.length >= MAX_COUNTERS) {
+      setMessage(`おはじきは${MAX_COUNTERS}こまで追加できます。`);
+      playSound(240, 0.16, 0.05);
+      return;
+    }
+
+    const nextId =
+      counters.length === 0
+        ? 1
+        : Math.max(...counters.map((counter) => counter.id)) + 1;
+
+    const width = size.width || window.innerWidth;
+    const radius = getCounterRadius(width);
+    const safeWidth = Math.max(width, radius * 2 + 40);
+    const usableWidth = Math.max(1, safeWidth - radius * 2 - 40);
+    const offsetIndex = counters.length % 8;
+
+    const nextX =
+      radius +
+      20 +
+      ((offsetIndex * (radius * 2 + 20)) % usableWidth);
+
+    const nextY =
+      150 +
+      Math.floor(counters.length / 8) * (radius * 2 + 24);
+
+    const safePosition = clampCounterPosition(nextX, nextY, {
+      width: safeWidth,
+      height: size.height || 520,
+    });
+
+    setCounters((current) => [
+      ...current,
+      {
+        id: nextId,
+        x: safePosition.x,
+        y: safePosition.y,
+        color,
+      },
+    ]);
+
+    setMessage(
+      color === "red"
+        ? "赤のおはじきを1こ追加しました。"
+        : "青のおはじきを1こ追加しました。",
+    );
+
+    playSound(color === "red" ? 620 : 470, 0.1, 0.06);
+  };
+
+  const removeCounter = () => {
+    if (counters.length <= MIN_COUNTERS) {
+      setMessage("おはじきは1こ以上残してください。");
+      playSound(240, 0.16, 0.05);
+      return;
+    }
+
+    setCounters((current) => current.slice(0, -1));
+    setMessage("おはじきを1こ減らしました。");
+    playSound(340, 0.08, 0.05);
+  };
+
+  const handleDragEnd = (
+    counterId: number,
+    newX: number,
+    newY: number,
+  ) => {
+    const safePosition = clampCounterPosition(newX, newY, size);
+
+    setCounters((current) =>
+      current.map((counter) =>
+        counter.id === counterId
+          ? {
+              ...counter,
+              x: safePosition.x,
+              y: safePosition.y,
+            }
+          : counter,
+      ),
+    );
+
+    setMessage("おはじきを動かしました。");
+    playSound(430, 0.05, 0.035);
+  };
+
+  const handleBack = () => {
+    onBack();
   };
 
   return (
-    <main className="min-h-screen bg-[#f6f9ff]">
-      <header className="flex min-h-24 flex-wrap items-center justify-between gap-4 border-b border-blue-100 bg-white/90 px-5 py-4 shadow-sm backdrop-blur-md">
-        <div>
-          <p className="text-xs font-bold tracking-[0.25em] text-blue-600">
-            DIGITAL SANSU SET
-          </p>
+    <main className="min-h-screen bg-[#f6f9ff] text-slate-900">
+      <header className="border-b border-blue-100 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-md sm:px-5 sm:py-4">
+        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-bold tracking-[0.25em] text-blue-600">
+                DIGITAL SANSU SET
+              </p>
 
-          <h1 className="text-2xl font-bold text-slate-900">おはじき教材</h1>
+              <h1 className="text-2xl font-black text-slate-900 sm:text-3xl">
+                おはじき教材
+              </h1>
 
-          <p className="text-sm text-slate-600">
-            おはじきを自由に動かして、5と10のまとまりを作りましょう。
-          </p>
-        </div>
+              <p className="mt-1 text-sm font-medium text-slate-600 sm:text-base">
+                おはじきを動かして、5と10のまとまりを作りましょう。
+              </p>
+            </div>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={resetCounters}
-            className="rounded-full border border-orange-300 bg-orange-50 px-5 py-3 font-bold text-orange-700 transition hover:bg-orange-100 focus:outline-none focus:ring-4 focus:ring-orange-200"
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-2xl bg-red-50 px-4 py-2 font-bold text-red-700">
+                赤：{redCount}こ
+              </div>
+
+              <div className="rounded-2xl bg-blue-50 px-4 py-2 font-bold text-blue-700">
+                青：{blueCount}こ
+              </div>
+
+              <div className="rounded-2xl bg-slate-100 px-4 py-2 font-black text-slate-800">
+                ぜんぶ：{counters.length}こ
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSoundEnabled((current) => !current);
+                  setMessage(
+                    soundEnabled
+                      ? "音をオフにしました。"
+                      : "音をオンにしました。",
+                  );
+                }}
+                className="min-h-12 rounded-2xl border border-violet-300 bg-violet-50 px-4 py-2 font-bold text-violet-700 transition hover:bg-violet-100 focus:outline-none focus:ring-4 focus:ring-violet-200"
+                aria-pressed={soundEnabled}
+              >
+                {soundEnabled ? "🔊 音オン" : "🔇 音オフ"}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:flex lg:flex-wrap">
+            <button
+              type="button"
+              onClick={() => addCounter("red")}
+              className="min-h-14 rounded-2xl bg-red-500 px-4 py-3 text-base font-black text-white shadow-md transition hover:-translate-y-0.5 hover:bg-red-600 focus:outline-none focus:ring-4 focus:ring-red-200"
+            >
+              ＋ 赤を追加
+            </button>
+
+            <button
+              type="button"
+              onClick={() => addCounter("blue")}
+              className="min-h-14 rounded-2xl bg-blue-500 px-4 py-3 text-base font-black text-white shadow-md transition hover:-translate-y-0.5 hover:bg-blue-600 focus:outline-none focus:ring-4 focus:ring-blue-200"
+            >
+              ＋ 青を追加
+            </button>
+
+            <button
+              type="button"
+              onClick={removeCounter}
+              className="min-h-14 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base font-black text-slate-700 shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-200"
+            >
+              − 1こ減らす
+            </button>
+
+            <button
+              type="button"
+              onClick={arrangeCounters}
+              className="min-h-14 rounded-2xl border border-cyan-300 bg-cyan-50 px-4 py-3 text-base font-black text-cyan-800 transition hover:bg-cyan-100 focus:outline-none focus:ring-4 focus:ring-cyan-200"
+            >
+              せいれつ
+            </button>
+
+            <button
+              type="button"
+              onClick={arrangeFiveGroups}
+              className="min-h-14 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-base font-black text-emerald-800 transition hover:bg-emerald-100 focus:outline-none focus:ring-4 focus:ring-emerald-200"
+            >
+              5のまとまり
+            </button>
+
+            <button
+              type="button"
+              onClick={arrangeTenGroup}
+              className="min-h-14 rounded-2xl border border-violet-300 bg-violet-50 px-4 py-3 text-base font-black text-violet-800 transition hover:bg-violet-100 focus:outline-none focus:ring-4 focus:ring-violet-200"
+            >
+              10のまとまり
+            </button>
+
+            <button
+              type="button"
+              onClick={resetCounters}
+              className="min-h-14 rounded-2xl border border-orange-300 bg-orange-50 px-4 py-3 text-base font-black text-orange-700 transition hover:bg-orange-100 focus:outline-none focus:ring-4 focus:ring-orange-200"
+            >
+              おかたづけ
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBack}
+              className="col-span-2 min-h-14 rounded-2xl bg-slate-800 px-4 py-3 text-base font-black text-white transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-300 sm:col-span-1"
+            >
+              教材一覧へもどる
+            </button>
+          </div>
+
+          <div
+            className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-center text-sm font-bold text-blue-900 sm:text-base"
+            aria-live="polite"
           >
-            おかたづけ
-          </button>
-
-          <button
-            type="button"
-            onClick={onBack}
-            className="rounded-full bg-slate-800 px-5 py-3 font-bold text-white transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-300"
-          >
-            教材一覧へもどる
-          </button>
+            {message}
+          </div>
         </div>
       </header>
 
-      <section className="overflow-hidden">
+      <section className="overflow-hidden bg-gradient-to-b from-white to-blue-50">
         {size.width > 0 && size.height > 0 && (
           <Stage width={size.width} height={size.height}>
             <Layer>
+              <Rect
+                x={12}
+                y={12}
+                width={Math.max(size.width - 24, 0)}
+                height={Math.max(size.height - 24, 0)}
+                fill="#ffffff"
+                stroke="#dbeafe"
+                strokeWidth={3}
+                cornerRadius={24}
+                shadowColor="#94a3b8"
+                shadowBlur={14}
+                shadowOpacity={0.16}
+                shadowOffsetY={5}
+              />
+
               <Text
-                x={30}
-                y={30}
-                text="赤と青のおはじきをドラッグしてみよう"
-                fontSize={22}
+                x={24}
+                y={28}
+                width={Math.max(size.width - 48, 0)}
+                text="● おはじきを指やマウスで動かしてみよう"
+                fontSize={size.width < 480 ? 17 : 21}
                 fontStyle="bold"
                 fill="#334155"
+                align="center"
+              />
+
+              <Text
+                x={24}
+                y={62}
+                width={Math.max(size.width - 48, 0)}
+                text={`赤 ${redCount}こ　＋　青 ${blueCount}こ　＝　ぜんぶ ${counters.length}こ`}
+                fontSize={size.width < 480 ? 15 : 18}
+                fontStyle="bold"
+                fill="#475569"
+                align="center"
               />
 
               {counters.map((counter) => (
@@ -326,25 +833,30 @@ function OhajikiScreen({ onBack }: OhajikiScreenProps) {
                   key={counter.id}
                   x={counter.x}
                   y={counter.y}
-                  radius={38}
-                  fill={counter.color}
+                  radius={counterRadius}
+                  fill={getCounterFill(counter.color)}
                   stroke="#ffffff"
-                  strokeWidth={5}
+                  strokeWidth={Math.max(4, counterRadius * 0.14)}
                   shadowColor="#64748b"
                   shadowBlur={12}
                   shadowOpacity={0.35}
                   shadowOffsetY={6}
                   draggable
+                  dragBoundFunc={(position) =>
+                    clampCounterPosition(
+                      position.x,
+                      position.y,
+                      size,
+                    )
+                  }
+                  onDragStart={() => {
+                    playSound(370, 0.04, 0.025);
+                  }}
                   onDragEnd={(event) => {
-                    const newX = event.target.x();
-                    const newY = event.target.y();
-
-                    setCounters((current) =>
-                      current.map((item) =>
-                        item.id === counter.id
-                          ? { ...item, x: newX, y: newY }
-                          : item,
-                      ),
+                    handleDragEnd(
+                      counter.id,
+                      event.target.x(),
+                      event.target.y(),
                     );
                   }}
                 />
