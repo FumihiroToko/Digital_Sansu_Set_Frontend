@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Circle, Layer, Rect, Stage, Text } from "react-konva";
+import CountingSticksScreen from "./CountingSticksScreen";
 
-type Screen = "home" | "materials" | "ohajiki";
+type Screen =
+  | "home"
+  | "materials"
+  | "ohajiki"
+  | "counting-sticks";
 
 type CounterColor = "red" | "blue";
 
@@ -44,7 +49,7 @@ const materials: Material[] = [
     title: "かぞえぼう",
     description: "ぼうを並べて、数のしくみを学びます。",
     icon: "▥",
-    available: false,
+    available: true,
   },
   {
     id: "blocks",
@@ -159,13 +164,28 @@ function App() {
   if (screen === "materials") {
     return (
       <MaterialSelectionScreen
-        onBack={() => setScreen("home")}
-        onSelectOhajiki={() => setScreen("ohajiki")}
-      />
+  onBack={() => setScreen("home")}
+  onSelectOhajiki={() => setScreen("ohajiki")}
+  onSelectCountingSticks={() =>
+    setScreen("counting-sticks")
+  }
+/>
     );
   }
 
-  return <OhajikiScreen onBack={() => setScreen("materials")} />;
+  if (screen === "counting-sticks") {
+  return (
+    <CountingSticksScreen
+      onBack={() => setScreen("materials")}
+    />
+  );
+}
+
+return (
+  <OhajikiScreen
+    onBack={() => setScreen("materials")}
+  />
+);
 }
 
 type HomeScreenProps = {
@@ -212,11 +232,13 @@ function HomeScreen({ onStart }: HomeScreenProps) {
 type MaterialSelectionScreenProps = {
   onBack: () => void;
   onSelectOhajiki: () => void;
+  onSelectCountingSticks: () => void;
 };
 
 function MaterialSelectionScreen({
   onBack,
   onSelectOhajiki,
+  onSelectCountingSticks,
 }: MaterialSelectionScreenProps) {
   return (
     <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-sky-50 via-white to-violet-50 px-4 py-6 sm:px-6 lg:px-8">
@@ -250,14 +272,24 @@ function MaterialSelectionScreen({
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {materials.map((material) => {
-            const isOhajiki = material.id === "ohajiki";
+            const isOhajiki =
+  material.id === "ohajiki";
+
+const isCountingSticks =
+  material.id === "counting-sticks";
 
             return (
               <button
                 key={material.id}
                 type="button"
                 disabled={!material.available}
-                onClick={isOhajiki ? onSelectOhajiki : undefined}
+                onClick={
+  isOhajiki
+    ? onSelectOhajiki
+    : isCountingSticks
+      ? onSelectCountingSticks
+      : undefined
+}
                 className={[
                   "group relative min-h-64 overflow-hidden rounded-[1.75rem] border p-6 text-left shadow-lg transition",
                   material.available
@@ -301,8 +333,8 @@ function MaterialSelectionScreen({
         </div>
 
         <footer className="mt-8 rounded-3xl border border-white/90 bg-white/75 px-6 py-4 text-center text-sm font-semibold text-slate-600 shadow-md backdrop-blur-md">
-          現在は「おはじき教材」を利用できます。
-        </footer>
+  現在は「おはじき教材」と「かぞえぼう教材」を利用できます。
+</footer>
       </section>
     </main>
   );
@@ -821,7 +853,7 @@ function OhajikiScreen({ onBack }: OhajikiScreenProps) {
                 x={24}
                 y={62}
                 width={Math.max(size.width - 48, 0)}
-                text={`赤 ${redCount}こ　＋　青 ${blueCount}こ　＝　ぜんぶ ${counters.length}こ`}
+                text={`赤 ${redCount}こ + 青 ${blueCount}こ = ぜんぶ ${counters.length}こ`}
                 fontSize={size.width < 480 ? 15 : 18}
                 fontStyle="bold"
                 fill="#475569"
