@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Circle, Layer, Rect, Stage, Text } from "react-konva";
 import CountingSticksScreen from "./CountingSticksScreen";
-import ArithmeticBlocksScreen from "./ArithmeticBlocksScreen";
 
 type Screen =
   | "home"
   | "materials"
   | "ohajiki"
-  | "counting-sticks"
-  | "arithmetic-blocks";
+  | "counting-sticks";
 
 type CounterColor = "red" | "blue";
 
@@ -54,12 +52,11 @@ const materials: Material[] = [
     available: true,
   },
   {
-  id: "arithmetic-blocks",
-  title: "さんすうブロック",
-  description:
-    "1、10、100のブロックを使って、数のしくみを学びます。",
-  icon: "■",
-  available: true,
+    id: "blocks",
+    title: "さんすうブロック",
+    description: "ブロックを使って、たし算やひき算を学びます。",
+    icon: "■",
+    available: false,
   },
   {
     id: "clock",
@@ -168,14 +165,9 @@ function App() {
     return (
       <MaterialSelectionScreen
   onBack={() => setScreen("home")}
-  onSelectOhajiki={() =>
-    setScreen("ohajiki")
-  }
+  onSelectOhajiki={() => setScreen("ohajiki")}
   onSelectCountingSticks={() =>
     setScreen("counting-sticks")
-  }
-  onSelectArithmeticBlocks={() =>
-    setScreen("arithmetic-blocks")
   }
 />
     );
@@ -184,14 +176,6 @@ function App() {
   if (screen === "counting-sticks") {
   return (
     <CountingSticksScreen
-      onBack={() => setScreen("materials")}
-    />
-  );
-}
-
-if (screen === "arithmetic-blocks") {
-  return (
-    <ArithmeticBlocksScreen
       onBack={() => setScreen("materials")}
     />
   );
@@ -249,14 +233,12 @@ type MaterialSelectionScreenProps = {
   onBack: () => void;
   onSelectOhajiki: () => void;
   onSelectCountingSticks: () => void;
-  onSelectArithmeticBlocks: () => void;
 };
 
 function MaterialSelectionScreen({
   onBack,
   onSelectOhajiki,
   onSelectCountingSticks,
-  onSelectArithmeticBlocks,
 }: MaterialSelectionScreenProps) {
   return (
     <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-sky-50 via-white to-violet-50 px-4 py-6 sm:px-6 lg:px-8">
@@ -296,10 +278,6 @@ function MaterialSelectionScreen({
 const isCountingSticks =
   material.id === "counting-sticks";
 
-const isArithmeticBlocks =
-  material.id ===
-  "arithmetic-blocks";
-
             return (
               <button
                 key={material.id}
@@ -310,9 +288,7 @@ const isArithmeticBlocks =
     ? onSelectOhajiki
     : isCountingSticks
       ? onSelectCountingSticks
-      : isArithmeticBlocks
-        ? onSelectArithmeticBlocks
-        : undefined
+      : undefined
 }
                 className={[
                   "group relative min-h-64 overflow-hidden rounded-[1.75rem] border p-6 text-left shadow-lg transition",
@@ -357,7 +333,7 @@ const isArithmeticBlocks =
         </div>
 
         <footer className="mt-8 rounded-3xl border border-white/90 bg-white/75 px-6 py-4 text-center text-sm font-semibold text-slate-600 shadow-md backdrop-blur-md">
-  現在は「おはじき教材」「かぞえぼう教材」「さんすうブロック教材」を利用できます。
+  現在は「おはじき教材」と「かぞえぼう教材」を利用できます。
 </footer>
       </section>
     </main>
